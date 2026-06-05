@@ -115,7 +115,7 @@ jobs:
 
           # Instalar dependencias
           echo "=== Instalando dependencias ==="
-          composer install ${{ env.COMPOSER_FLAGS }}
+          ea-php83 /usr/local/bin/composer install ${{ env.COMPOSER_FLAGS }}
           echo "✓ Dependencias instaladas"
 
           # Ejecutar migraciones
