@@ -46,7 +46,7 @@ jobs:
 
       - name: Run tests
         working-directory: backend
-        run: php artisan test --no-interaction
+        run: ea-php83 artisan test --no-interaction
         continue-on-error: true
 
   deploy:
@@ -93,7 +93,7 @@ jobs:
           set -e
 
           # Entrar al directorio del proyecto
-          cd ${{ secrets.SSH_PROJECT_PATH }}/backend
+          cd ${{ secrets.SSH_PROJECT_PATH }}
 
           # Mostrar info
           echo "=== Iniciando deploy ==="
@@ -120,14 +120,14 @@ jobs:
 
           # Ejecutar migraciones
           echo "=== Ejecutando migraciones ==="
-          php artisan migrate --force --no-interaction
+          ea-php83 artisan migrate --force --no-interaction
           echo "✓ Migraciones completadas"
 
           # Cache
           echo "=== Limpiando y cacharizando ==="
-          php artisan config:cache
-          php artisan route:cache
-          php artisan view:cache
+          ea-php83 artisan config:cache
+          ea-php83 artisan route:cache
+          ea-php83 artisan view:cache
           echo "✓ Cache actualizado"
 
           # Permisología
@@ -148,7 +148,7 @@ jobs:
       - name: Verify Deployment
         run: |
           ssh deploy-server << 'EOF'
-          cd ${{ secrets.SSH_PROJECT_PATH }}/backend
+          cd ${{ secrets.SSH_PROJECT_PATH }}
 
           echo "=== Verificando deploy ==="
 
@@ -190,4 +190,3 @@ jobs:
           echo "❌ Deploy falló"
           exit 1
 
-          
