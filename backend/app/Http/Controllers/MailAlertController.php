@@ -74,6 +74,7 @@ class MailAlertController extends Controller
             'success' => true,
             'alert_id' => $alert->id,
         ], 201);
+        
     }
 
     public function index(Request $request): JsonResponse
