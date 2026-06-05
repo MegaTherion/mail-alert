@@ -93,7 +93,7 @@ jobs:
           set -e
 
           # Entrar al directorio del proyecto
-          cd ${{ secrets.SSH_PROJECT_PATH }}
+          cd ${{ secrets.SSH_PROJECT_PATH }}/backend
 
           # Mostrar info
           echo "=== Iniciando deploy ==="
@@ -148,7 +148,7 @@ jobs:
       - name: Verify Deployment
         run: |
           ssh deploy-server << 'EOF'
-          cd ${{ secrets.SSH_PROJECT_PATH }}
+          cd ${{ secrets.SSH_PROJECT_PATH }}/backend
 
           echo "=== Verificando deploy ==="
 
@@ -189,4 +189,3 @@ jobs:
         run: |
           echo "❌ Deploy falló"
           exit 1
-
