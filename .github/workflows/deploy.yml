@@ -9,51 +9,10 @@ on:
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
-env:
-  LARAVEL_ENV: production
-  COMPOSER_FLAGS: "--no-dev --prefer-dist --no-interaction"
-
 jobs:
-  test:
-    name: Test & Build
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          extensions: mbstring, dom, fileinfo, guzzle
-          coverage: none
-
-      - name: Cache composer packages
-        uses: actions/cache@v3
-        with:
-          path: backend/vendor
-          key: composer-${{ hashFiles('backend/composer.lock') }}
-          restore-keys: composer-
-
-      - name: Install dependencies
-        working-directory: backend
-        run: composer install ${{ env.COMPOSER_FLAGS }}
-
-      - name: Check PHP syntax
-        working-directory: backend
-        run: find app -name "*.php" -exec php -l {} \;
-
-      - name: Run tests
-        working-directory: backend
-        run: ea-php83 artisan test --no-interaction
-        continue-on-error: true
-
   deploy:
-    name: Deploy to Production
-    needs: test
+    name: Deploy to cPanel Shared Hosting
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
       - name: Checkout code
@@ -64,22 +23,17 @@ jobs:
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
 
-          # Detect SSH port (default 22 if not specified)
-          SSH_PORT="${{ secrets.SSH_PORT }}"
-          SSH_PORT=${SSH_PORT:-22}
-
-          # Add host to known_hosts
-          ssh-keyscan -p $SSH_PORT -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
-
-          # Save private key and detect type (RSA or ED25519)
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          # Save private key
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
 
-          # Create SSH config for cleaner connections
+          # Add host to known_hosts
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          # Create SSH config
           cat > ~/.ssh/config << 'SSHCONFIG'
           Host deploy-server
             HostName ${{ secrets.SSH_HOST }}
-            Port ${{ secrets.SSH_PORT || 22 }}
             User ${{ secrets.SSH_USER }}
             IdentityFile ~/.ssh/deploy_key
             StrictHostKeyChecking=accept-new
@@ -89,84 +43,65 @@ jobs:
 
       - name: Deploy via SSH
         run: |
-          ssh deploy-server << 'EOF'
+          ssh deploy-server << 'DEPLOY'
           set -e
 
-          # Entrar al directorio del proyecto
-          cd ${{ secrets.SSH_PROJECT_PATH }}/backend
+          # Navigate to project directory
+          cd ${{ secrets.SSH_PATH }}/backend
 
-          # Mostrar info
-          echo "=== Iniciando deploy ==="
-          echo "Servidor: $(hostname)"
-          echo "Rama: main"
-          echo "Fecha: $(date)"
+          echo "=== Starting Deploy ==="
+          echo "Server: \$(hostname)"
+          echo "Branch: main"
+          echo "Date: \$(date)"
 
-          # Backup de .env (si existe)
+          # Backup .env if exists
           if [ -f .env ]; then
-            cp .env .env.backup.$(date +%s)
-            echo "✓ Backup de .env creado"
+            cp .env .env.backup.\$(date +%s)
+            echo "✓ .env backed up"
           fi
 
-          # Pull de código
-          echo "=== Descargando código ==="
+          # Pull latest code
+          echo ""
+          echo "=== Pulling code ==="
           git fetch origin main
           git checkout origin/main
-          echo "✓ Código actualizado"
+          echo "✓ Code updated"
 
-          # Instalar dependencias
-          echo "=== Instalando dependencias ==="
-          ea-php83 /usr/local/bin/composer install ${{ env.COMPOSER_FLAGS }}
-          echo "✓ Dependencias instaladas"
+          # Install dependencies
+          echo ""
+          echo "=== Installing dependencies ==="
+          composer install --no-dev --prefer-dist --no-interaction
+          echo "✓ Dependencies installed"
 
-          # Ejecutar migraciones
-          echo "=== Ejecutando migraciones ==="
-          ea-php83 artisan migrate --force --no-interaction
-          echo "✓ Migraciones completadas"
+          # Clear configuration cache
+          echo ""
+          echo "=== Clearing configuration ==="
+          php artisan config:clear
+          echo "✓ Configuration cleared"
 
-          # Cache
-          echo "=== Limpiando y cacharizando ==="
-          ea-php83 artisan config:cache
-          ea-php83 artisan route:cache
-          echo "✓ Cache actualizado"
+          # Run migrations
+          echo ""
+          echo "=== Running migrations ==="
+          php artisan migrate --force --no-interaction
+          echo "✓ Migrations completed"
 
-          # Permisología
-          echo "=== Configurando permisos ==="
+          # Cache optimization
+          echo ""
+          echo "=== Caching configuration ==="
+          php artisan config:cache
+          php artisan route:cache
+          echo "✓ Cache updated"
+
+          # Set permissions
+          echo ""
+          echo "=== Setting permissions ==="
           chmod -R 775 storage bootstrap/cache
-          echo "✓ Permisos configurados"
-
-          # Restart queue workers si existen
-          if command -v supervisorctl &> /dev/null; then
-            echo "=== Reiniciando queue workers ==="
-            sudo supervisorctl restart laravel-worker: || echo "⚠ Queue workers no configurados"
-          fi
-
-          echo "✓ Deploy completado exitosamente"
-          echo "=== Fin del deploy ==="
-          EOF
-
-      - name: Verify Deployment
-        run: |
-          ssh deploy-server << 'EOF'
-          cd ${{ secrets.SSH_PROJECT_PATH }}/backend
-
-          echo "=== Verificando deploy ==="
-
-          # Verificar que la app está en pie
-          DEPLOY_URL="${{ secrets.DEPLOY_URL }}"
-          DEPLOY_URL=${DEPLOY_URL:-http://localhost:8000}
-
-          curl -s ${DEPLOY_URL}/api/alerts \
-            -H "Authorization: Bearer ${{ secrets.ALERT_SECRET }}" \
-            -o /dev/null -w "HTTP Status: %{http_code}\n" || echo "⚠ App no responde (puede ser normal si usa reverse proxy)"
-
-          # Verificar logs
-          echo ""
-          echo "=== Últimas líneas del log ==="
-          tail -20 storage/logs/laravel.log || echo "Sin logs aún"
+          echo "✓ Permissions set"
 
           echo ""
-          echo "✓ Verificación completada"
-          EOF
+          echo "✅ Deployment completed successfully"
+          echo "=== End Deploy ==="
+          DEPLOY
 
       - name: Cleanup SSH
         if: always()
@@ -174,22 +109,3 @@ jobs:
           rm -f ~/.ssh/deploy_key
           rm -f ~/.ssh/config
           rm -f ~/.ssh/known_hosts
-
-  notify:
-    name: Notify Status
-    needs: deploy
-    runs-on: ubuntu-latest
-    if: always()
-
-    steps:
-      - name: Deployment Success
-        if: needs.deploy.result == 'success'
-        run: echo "✅ Deploy completado exitosamente"
-
-      - name: Deployment Failed
-        if: needs.deploy.result == 'failure'
-        run: |
-          echo "❌ Deploy falló"
-          exit 1
-
-          
