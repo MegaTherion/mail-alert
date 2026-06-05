@@ -22,18 +22,44 @@ cp .env.example .env
 php artisan key:generate
 ```
 
-Completar valores:
+Completar valores en `.env`:
 ```env
+# Database (MySQL)
+DB_HOST=127.0.0.1
+DB_DATABASE=mail_alert
+DB_USERNAME=mail_alert_user
+DB_PASSWORD=your_secure_password_here
+
+# Firebase
 ALERT_SECRET=tu_clave_secreta_minimo_32_caracteres
 FCM_PROJECT_ID=tu-firebase-project-id
 FCM_SERVICE_ACCOUNT_JSON=storage/firebase/service-account.json
 ```
 
+📖 **Para MySQL setup completo, ver [MYSQL_SETUP.md](../MYSQL_SETUP.md)**
+
 ### 3. Crear base de datos y ejecutar migraciones
+
+**Opción A: MySQL** (Recomendado)
 ```bash
-touch database.sqlite  # Si usas SQLite
+# Crear BD y usuario
+mysql -u root -p
+CREATE DATABASE mail_alert CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'mail_alert_user'@'localhost' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON mail_alert.* TO 'mail_alert_user'@'localhost';
+FLUSH PRIVILEGES;
+
+# Ejecutar migraciones
 php artisan migrate
 ```
+
+**Opción B: SQLite** (Desarrollo local)
+```bash
+touch database.sqlite
+php artisan migrate
+```
+
+📖 **Ver [MYSQL_SETUP.md](../MYSQL_SETUP.md) para guía completa de MySQL**
 
 ### 4. Obtener Firebase Service Account
 
