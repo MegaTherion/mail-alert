@@ -115,6 +115,19 @@ cualquier_puerto_customizado
 
 **Importante**: Solo agregar este secret si tu servidor usa un puerto SSH diferente al 22. Si usas puerto 22, NO es necesario agregar este secret (el workflow usa 22 por defecto).
 
+### `DEPLOY_URL` (Opcional)
+
+URL del servidor donde está deployada la app (para verificación post-deploy):
+```
+https://tu-dominio.com
+o
+https://api.ejemplo.com
+o
+http://192.168.1.100
+```
+
+**Importante**: Si NO configuras este secret, el workflow intentará verificar en `http://localhost:8000` (que fallará). Configúralo con la URL real de tu servidor.
+
 ### `ALERT_SECRET`
 
 El mismo valor de `ALERT_SECRET` en `.env`:
