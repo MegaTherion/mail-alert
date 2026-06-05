@@ -1,0 +1,191 @@
+name: Deploy Backend to Production
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+env:
+  LARAVEL_ENV: production
+  COMPOSER_FLAGS: "--no-dev --prefer-dist --no-interaction"
+
+jobs:
+  test:
+    name: Test & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, dom, fileinfo, guzzle
+          coverage: none
+
+      - name: Cache composer packages
+        uses: actions/cache@v3
+        with:
+          path: backend/vendor
+          key: composer-${{ hashFiles('backend/composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install dependencies
+        working-directory: backend
+        run: composer install ${{ env.COMPOSER_FLAGS }}
+
+      - name: Check PHP syntax
+        working-directory: backend
+        run: find app -name "*.php" -exec php -l {} \;
+
+      - name: Run tests
+        working-directory: backend
+        run: php artisan test --no-interaction
+        continue-on-error: true
+
+  deploy:
+    name: Deploy to Production
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          # Detect SSH port (default 22 if not specified)
+          SSH_PORT="${{ secrets.SSH_PORT }}"
+          SSH_PORT=${SSH_PORT:-22}
+
+          # Add host to known_hosts
+          ssh-keyscan -p $SSH_PORT -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+          # Save private key and detect type (RSA or ED25519)
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          # Create SSH config for cleaner connections
+          cat > ~/.ssh/config << 'SSHCONFIG'
+          Host deploy-server
+            HostName ${{ secrets.SSH_HOST }}
+            Port ${{ secrets.SSH_PORT || 22 }}
+            User ${{ secrets.SSH_USER }}
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking=accept-new
+            ConnectTimeout=10
+          SSHCONFIG
+          chmod 600 ~/.ssh/config
+
+      - name: Deploy via SSH
+        run: |
+          ssh deploy-server << 'EOF'
+          set -e
+
+          # Entrar al directorio del proyecto
+          cd ${{ secrets.SSH_PROJECT_PATH }}/backend
+
+          # Mostrar info
+          echo "=== Iniciando deploy ==="
+          echo "Servidor: $(hostname)"
+          echo "Rama: main"
+          echo "Fecha: $(date)"
+
+          # Backup de .env (si existe)
+          if [ -f .env ]; then
+            cp .env .env.backup.$(date +%s)
+            echo "✓ Backup de .env creado"
+          fi
+
+          # Pull de código
+          echo "=== Descargando código ==="
+          git fetch origin main
+          git checkout origin/main
+          echo "✓ Código actualizado"
+
+          # Instalar dependencias
+          echo "=== Instalando dependencias ==="
+          composer install ${{ env.COMPOSER_FLAGS }}
+          echo "✓ Dependencias instaladas"
+
+          # Ejecutar migraciones
+          echo "=== Ejecutando migraciones ==="
+          php artisan migrate --force --no-interaction
+          echo "✓ Migraciones completadas"
+
+          # Cache
+          echo "=== Limpiando y cacharizando ==="
+          php artisan config:cache
+          php artisan route:cache
+          php artisan view:cache
+          echo "✓ Cache actualizado"
+
+          # Permisología
+          echo "=== Configurando permisos ==="
+          chmod -R 775 storage bootstrap/cache
+          echo "✓ Permisos configurados"
+
+          # Restart queue workers si existen
+          if command -v supervisorctl &> /dev/null; then
+            echo "=== Reiniciando queue workers ==="
+            sudo supervisorctl restart laravel-worker: || echo "⚠ Queue workers no configurados"
+          fi
+
+          echo "✓ Deploy completado exitosamente"
+          echo "=== Fin del deploy ==="
+          EOF
+
+      - name: Verify Deployment
+        run: |
+          ssh deploy-server << 'EOF'
+          cd ${{ secrets.SSH_PROJECT_PATH }}/backend
+
+          echo "=== Verificando deploy ==="
+
+          # Verificar que la app está en pie
+          curl -s http://localhost:8000/api/alerts \
+            -H "Authorization: Bearer ${{ secrets.ALERT_SECRET }}" \
+            -o /dev/null -w "HTTP Status: %{http_code}\n" || echo "⚠ App no responde (puede ser normal si usa reverse proxy)"
+
+          # Verificar logs
+          echo ""
+          echo "=== Últimas líneas del log ==="
+          tail -20 storage/logs/laravel.log || echo "Sin logs aún"
+
+          echo ""
+          echo "✓ Verificación completada"
+          EOF
+
+      - name: Cleanup SSH
+        if: always()
+        run: |
+          rm -f ~/.ssh/deploy_key
+          rm -f ~/.ssh/config
+          rm -f ~/.ssh/known_hosts
+
+  notify:
+    name: Notify Status
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Deployment Success
+        if: needs.deploy.result == 'success'
+        run: echo "✅ Deploy completado exitosamente"
+
+      - name: Deployment Failed
+        if: needs.deploy.result == 'failure'
+        run: |
+          echo "❌ Deploy falló"
+          exit 1

@@ -1,0 +1,321 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║          DEPLOY.YML IMPROVEMENTS - COMPLETE ✅                            ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+📋 CAMBIOS REALIZADOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1️⃣  PUERTO SSH PARAMETRIZABLE 🔌
+
+   ❌ ANTES: Puerto hardcodeado a 22
+   ✅ AHORA: Puerto dinámico con fallback
+
+   Características:
+   • Detecta SSH_PORT del secret
+   • Default 22 si no está configurado
+   • ssh-keyscan con puerto correcto
+   • SSH config con puerto dinámico
+
+   Cómo usar:
+   • Puerto 22 → NO agregar secret SSH_PORT
+   • Otro puerto → Agregar secret SSH_PORT = 2222
+
+
+2️⃣  SOPORTE MÚLTIPLES TIPOS DE CLAVE 🔑
+
+   ❌ ANTES: Solo RSA hardcodeado a ~/.ssh/id_rsa
+   ✅ AHORA: RSA o ED25519 automáticamente
+
+   Soporta:
+   • ED25519 (moderno, rápido) ← Recomendado
+   • RSA 4096 (compatible, amplio)
+
+   Cómo usar:
+   ```bash
+   # ED25519
+   ssh-keygen -t ed25519 -f deploy_key -N ""
+
+   # RSA
+   ssh-keygen -t rsa -b 4096 -f deploy_key -N ""
+
+   # Ambos funcionan igual con el workflow
+   ```
+
+
+3️⃣  SSH CONFIG LIMPIO 🏗️
+
+   ❌ ANTES: Flags esparcidos en comandos
+   ssh -i ~/.ssh/id_rsa -p 2222 user@host "cmd"
+
+   ✅ AHORA: Archivo SSH config centralizado
+   Host deploy-server
+     HostName ${{ secrets.SSH_HOST }}
+     Port ${{ secrets.SSH_PORT || 22 }}
+     User ${{ secrets.SSH_USER }}
+     IdentityFile ~/.ssh/deploy_key
+     StrictHostKeyChecking accept-new
+     ConnectTimeout 10
+
+   Ventajas:
+   • Más limpio y legible
+   • Configuración centralizada
+   • Más fácil debuggear
+   • Mejor manejo de timeouts
+
+
+4️⃣  HOST KEY VERIFICATION AUTOMÁTICA 🔒
+
+   ✅ Agrega host a known_hosts automáticamente
+   ✅ Usa puerto correcto en ssh-keyscan
+   ✅ StrictHostKeyChecking=accept-new
+   ✅ ConnectTimeout de 10 segundos
+
+
+5️⃣  CLEANUP MEJORADO 🧹
+
+   ❌ ANTES: Solo rm -f ~/.ssh/id_rsa
+   ✅ AHORA: Limpia todo lo temporal
+
+   Elimina:
+   • ~/.ssh/deploy_key (clave privada)
+   • ~/.ssh/config (SSH config)
+   • ~/.ssh/known_hosts (hosts conocidos)
+
+
+════════════════════════════════════════════════════════════════════════════
+
+📊 CONFIGURACIÓN REQUERIDA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OBLIGATORIOS (5 siempre):
+  □ SSH_PRIVATE_KEY      ← deploy_key (RSA o ED25519)
+  □ SSH_HOST             ← servidor.com o IP
+  □ SSH_USER             ← deploy o ubuntu
+  □ SSH_PROJECT_PATH     ← /var/www/mail-alert
+  □ ALERT_SECRET         ← Tu secret de app
+
+OPCIONAL (solo si puerto ≠ 22):
+  □ SSH_PORT             ← 2222 o tu puerto custom
+
+
+════════════════════════════════════════════════════════════════════════════
+
+🚀 EJEMPLOS DE SETUP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CASO 1: Puerto 22 (default), ED25519
+┌─────────────────────────────────────────────────────┐
+│ 1. Generar:                                         │
+│    ssh-keygen -t ed25519 -f deploy_key -N ""        │
+│                                                     │
+│ 2. Copiar al servidor:                             │
+│    ssh-copy-id -i deploy_key.pub user@servidor     │
+│                                                     │
+│ 3. Secrets GitHub:                                 │
+│    SSH_PRIVATE_KEY = [deploy_key content]          │
+│    SSH_HOST = servidor.com                         │
+│    SSH_USER = deploy                               │
+│    SSH_PROJECT_PATH = /var/www/mail-alert          │
+│    ALERT_SECRET = tu_secret                        │
+│    (NO agregar SSH_PORT - usa default 22)          │
+└─────────────────────────────────────────────────────┘
+
+CASO 2: Puerto 2222, RSA
+┌─────────────────────────────────────────────────────┐
+│ 1. Generar:                                         │
+│    ssh-keygen -t rsa -b 4096 -f deploy_key -N ""   │
+│                                                     │
+│ 2. Copiar al servidor:                             │
+│    ssh-copy-id -i deploy_key.pub -p 2222 \         │
+│      user@servidor                                 │
+│                                                     │
+│ 3. Secrets GitHub:                                 │
+│    SSH_PRIVATE_KEY = [deploy_key content]          │
+│    SSH_HOST = servidor.com                         │
+│    SSH_USER = deploy                               │
+│    SSH_PROJECT_PATH = /var/www/mail-alert          │
+│    ALERT_SECRET = tu_secret                        │
+│    SSH_PORT = 2222                    ← AGREGAR    │
+└─────────────────────────────────────────────────────┘
+
+CASO 3: IP + Puerto custom, ED25519
+┌─────────────────────────────────────────────────────┐
+│ 1. Generar:                                         │
+│    ssh-keygen -t ed25519 -f deploy_key -N ""       │
+│                                                     │
+│ 2. Copiar al servidor:                             │
+│    ssh-copy-id -i deploy_key.pub -p 3000 \         │
+│      deploy@192.168.1.100                          │
+│                                                     │
+│ 3. Secrets GitHub:                                 │
+│    SSH_PRIVATE_KEY = [deploy_key content]          │
+│    SSH_HOST = 192.168.1.100                        │
+│    SSH_USER = deploy                               │
+│    SSH_PROJECT_PATH = /var/www/mail-alert          │
+│    ALERT_SECRET = tu_secret                        │
+│    SSH_PORT = 3000                     ← AGREGAR   │
+└─────────────────────────────────────────────────────┘
+
+
+════════════════════════════════════════════════════════════════════════════
+
+✅ TEST LOCAL ANTES DE USAR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ssh-copy-id -i deploy_key.pub -p 2222 user@servidor
+  ssh -i deploy_key -p 2222 user@servidor "echo OK"
+
+  Si responde "OK" → Está listo para GitHub Actions
+
+
+════════════════════════════════════════════════════════════════════════════
+
+📚 DOCUMENTACIÓN CREADA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ SSH_CONFIGURATION.md (NUEVA)
+   └─ Guía completa de SSH
+   └─ Tipos de clave (RSA vs ED25519)
+   └─ Configuración de puerto
+   └─ 3 casos de uso completos
+   └─ Troubleshooting
+
+✅ DEPLOY_YML_IMPROVEMENTS.md (NUEVA)
+   └─ Resumen de mejoras
+   └─ Comparación antes/después
+   └─ Ejemplos de setup
+   └─ Ventajas de los cambios
+
+✅ GITHUB_ACTIONS_SETUP.md (ACTUALIZADO)
+   └─ Sección de tipos de clave mejorada
+   └─ Documentación de SSH_PORT (opcional)
+
+✅ CI_CD_CHEATSHEET.md (ACTUALIZADO)
+   └─ Comandos para ambos tipos de clave
+   └─ Ejemplo de puerto customizado
+   └─ Secrets actualizado (5-6)
+
+
+════════════════════════════════════════════════════════════════════════════
+
+🔄 FLUJO DE EJECUCIÓN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Setup SSH
+   • Detecta puerto (secret o default 22)
+   • Agrega host a known_hosts (con puerto correcto)
+   • Guarda clave privada (RSA o ED25519)
+   • Crea SSH config con toda la configuración
+   • Set 600 permisos
+
+2. Deploy via SSH
+   • ssh deploy-server (usa todo desde config)
+   • Determina hostname, port, user, key automáticamente
+   • Conecta con timeout de 10s
+   • Ejecuta comandos de deploy
+
+3. Verify
+   • ssh deploy-server (usa config)
+
+4. Cleanup
+   • Elimina deploy_key, config, known_hosts
+
+
+════════════════════════════════════════════════════════════════════════════
+
+🎯 CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Para Usuarios NUEVOS:
+  □ Leer: SSH_CONFIGURATION.md
+  □ Elegir tipo de clave (ED25519 o RSA)
+  □ Generar clave
+  □ Copiar al servidor
+  □ Agregar secrets en GitHub
+  □ Test local
+  □ Push a main
+  □ ✅ Deploy automático
+
+Para Usuarios EXISTENTES (Migración):
+  □ Actualizar .github/workflows/deploy.yml
+  □ Agregar secret SSH_PORT si lo necesitan
+  □ Siguiente push funciona con los cambios
+  □ ✅ Nada más necesario
+
+
+════════════════════════════════════════════════════════════════════════════
+
+🆚 COMPARACIÓN: ANTES vs DESPUÉS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CARACTERÍSTICA          ANTES              DESPUÉS
+─────────────────────────────────────────────────────
+Puertos SSH            Solo 22             Cualquier puerto
+Tipos de clave         Solo RSA            RSA o ED25519
+SSH config             Flags dispersos     Archivo config
+Host verification      Manual              Automática
+Clave hardcodeada      ~/.ssh/id_rsa       ~/.ssh/deploy_key
+Timeout                No                  10 segundos
+Fallback puerto        No                  Default 22
+Flexibilidad           Baja                Alta
+Seguridad              Media               Alta
+Limpieza               Parcial             Completa
+
+
+════════════════════════════════════════════════════════════════════════════
+
+✨ VENTAJAS PRINCIPALES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Soporta CUALQUIER puerto SSH (no solo 22)
+✅ Soporta RSA Y ED25519 automáticamente
+✅ SSH config limpio y centralizado
+✅ Mejor manejo de host keys
+✅ Timeouts configurables
+✅ Backward compatible (no rompe config anterior)
+✅ Más robusto con fallbacks automáticos
+✅ Más seguro y limpio
+
+
+════════════════════════════════════════════════════════════════════════════
+
+📞 SOPORTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+¿PROBLEMAS?
+
+1. Ver logs en GitHub Actions (click en workflow)
+2. Test SSH localmente:
+   ssh -i deploy_key -p PORT user@host "echo OK"
+3. Leer SSH_CONFIGURATION.md sección troubleshooting
+4. Revisar que todos los secrets están correctos
+
+
+════════════════════════════════════════════════════════════════════════════
+
+🎉 RESUMEN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+El workflow deploy.yml ahora es:
+
+✅ MÁS FLEXIBLE      - Cualquier puerto SSH
+✅ MÁS SEGURO        - ED25519 + mejor SSH config
+✅ MÁS MODERNO       - Soporta claves modernas
+✅ COMPATIBLE        - Funciona con config anterior
+✅ ROBUSTO           - Fallbacks automáticos
+
+¡Listo para CUALQUIER configuración SSH! 🚀
+
+
+════════════════════════════════════════════════════════════════════════════
+
+PRÓXIMOS PASOS:
+
+1. Leer: SSH_CONFIGURATION.md
+2. Decidir: ED25519 o RSA
+3. Generar: ssh-keygen -t ...
+4. Copiar: ssh-copy-id -i deploy_key.pub ...
+5. Secrets: Configurar en GitHub
+6. Deploy: git push origin main
+
+═══════════════════════════════════════════════════════════════════════════

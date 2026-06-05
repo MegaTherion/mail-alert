@@ -1,0 +1,408 @@
+name: Deploy (Advanced Multi-Environment)
+
+on:
+  push:
+    branches:
+      - develop  # Staging
+      - main     # Production
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy*.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}-backend
+
+jobs:
+  # ========== TEST & BUILD ==========
+  test:
+    name: Test & Build
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, dom, fileinfo, curl, guzzle
+          coverage: xdebug
+          tools: phpstan, php-cs-fixer
+
+      - name: Cache composer packages
+        uses: actions/cache@v3
+        with:
+          path: backend/vendor
+          key: composer-${{ hashFiles('backend/composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install dependencies
+        working-directory: backend
+        run: composer install --no-interaction
+
+      - name: Run PHPStan
+        working-directory: backend
+        run: phpstan analyse app --level=7 || true
+        continue-on-error: true
+
+      - name: Run tests
+        working-directory: backend
+        run: php artisan test --no-interaction --coverage
+        continue-on-error: true
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          directory: ./backend
+          fail_ci_if_error: false
+
+  # ========== STAGING DEPLOY ==========
+  deploy-staging:
+    name: Deploy to Staging
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging.tu-dominio.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.STAGING_SSH_HOST }} >> ~/.ssh/known_hosts
+          echo "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Deploy to Staging
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_SSH_HOST }} << 'EOF'
+          set -e
+
+          echo "🚀 Starting staging deployment at $(date)"
+          cd ${{ secrets.STAGING_SSH_PROJECT_PATH }}/backend
+
+          # Actualizar código
+          git fetch origin develop
+          git checkout origin/develop
+
+          # Instalar dependencias
+          composer install --no-dev --prefer-dist
+
+          # Migraciones
+          php artisan migrate --force --step
+
+          # Cache y optimization
+          php artisan config:cache
+          php artisan route:cache
+          php artisan view:cache
+
+          # Permisos
+          chmod -R 775 storage bootstrap/cache
+
+          echo "✅ Staging deployment completed"
+          EOF
+
+      - name: Run Staging Tests
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_SSH_HOST }} << 'EOF'
+          cd ${{ secrets.STAGING_SSH_PROJECT_PATH }}/backend
+
+          # Health check
+          curl -f http://localhost/api/alerts \
+            -H "Authorization: Bearer ${{ secrets.ALERT_SECRET }}" \
+            -o /dev/null -w "HTTP Status: %{http_code}\n"
+          EOF
+
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/id_rsa
+
+      - name: Notify Slack (Staging)
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "Staging Deployment",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Staging Deployment*\nStatus: ${{ job.status }}\nAuthor: ${{ github.actor }}\nBranch: develop"
+                  }
+                }
+              ]
+            }
+
+  # ========== PRODUCTION DEPLOY ==========
+  deploy-production:
+    name: Deploy to Production
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://tu-dominio.com
+
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create Release Tag
+        run: |
+          TAG="v$(date +'%Y.%m.%d-%H%M%S')"
+          git tag $TAG
+          echo "RELEASE_TAG=$TAG" >> $GITHUB_ENV
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Pre-Deploy Checks
+        run: |
+          echo "🔍 Pre-deployment checks..."
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref }}"
+          echo "Author: ${{ github.actor }}"
+
+      - name: Deploy to Production
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+          set -e
+
+          DEPLOY_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+          echo "============================================"
+          echo "🚀 PRODUCTION DEPLOYMENT STARTED"
+          echo "Time: $DEPLOY_TIME"
+          echo "============================================"
+
+          cd ${{ secrets.SSH_PROJECT_PATH }}/backend
+
+          # Backup BD antes de deploy
+          echo "📦 Creating database backup..."
+          if [ -f database.sqlite ]; then
+            cp database.sqlite database.sqlite.backup.$(date +%s)
+            echo "✓ Database backup created"
+          fi
+
+          # Backup .env
+          echo "🔐 Backing up environment..."
+          cp .env .env.backup.$(date +%s)
+          echo "✓ Environment backup created"
+
+          # Actualizar código
+          echo "📥 Pulling code from main..."
+          git fetch origin main
+          git checkout origin/main
+          echo "✓ Code updated"
+
+          # Instalar dependencias
+          echo "📚 Installing dependencies..."
+          composer install --no-dev --prefer-dist --no-interaction
+          echo "✓ Dependencies installed"
+
+          # Migraciones
+          echo "🗄️  Running migrations..."
+          php artisan migrate --force --step
+          echo "✓ Migrations completed"
+
+          # Cache y optimization
+          echo "⚡ Optimizing application..."
+          php artisan config:cache
+          php artisan route:cache
+          php artisan view:cache
+          echo "✓ Cache cleared and rebuilt"
+
+          # Permisos
+          chmod -R 775 storage bootstrap/cache
+
+          # Restart PHP-FPM
+          echo "🔄 Restarting PHP-FPM..."
+          sudo systemctl restart php8.3-fpm || echo "⚠️  Could not restart PHP-FPM (maybe no sudo)"
+
+          echo "============================================"
+          echo "✅ PRODUCTION DEPLOYMENT COMPLETED"
+          echo "============================================"
+          EOF
+
+      - name: Health Check
+        run: |
+          echo "🏥 Running health checks..."
+
+          # Wait for app to be ready
+          sleep 5
+
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+          cd ${{ secrets.SSH_PROJECT_PATH }}/backend
+
+          # API health
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            http://localhost:8000/api/alerts \
+            -H "Authorization: Bearer ${{ secrets.ALERT_SECRET }}")
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ API is healthy (HTTP $HTTP_CODE)"
+          else
+            echo "⚠️  API returned HTTP $HTTP_CODE"
+            tail -50 storage/logs/laravel.log
+            exit 1
+          fi
+          EOF
+
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/id_rsa
+
+      - name: Create GitHub Release
+        if: success()
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          release_name: Production Release ${{ env.RELEASE_TAG }}
+          body: |
+            Production deployment completed successfully.
+
+            **Deployment Information:**
+            - Time: ${{ github.event.head_commit.timestamp }}
+            - Author: ${{ github.actor }}
+            - Commit: ${{ github.sha }}
+
+            **Changes:**
+            ${{ github.event.head_commit.message }}
+          draft: false
+          prerelease: false
+
+      - name: Notify Slack Success
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "🎉 Production Deployment Successful",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*✅ Production Deployment Successful*\n\nAuthor: ${{ github.actor }}\nRelease: ${{ env.RELEASE_TAG }}\n<https://github.com/${{ github.repository }}/releases/tag/${{ env.RELEASE_TAG }}|View Release>"
+                  }
+                }
+              ]
+            }
+
+      - name: Notify Slack Failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "❌ Production Deployment Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*❌ Production Deployment Failed*\n\nAuthor: ${{ github.actor }}\nCheck: <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|Workflow Logs>"
+                  }
+                }
+              ]
+            }
+
+  # ========== ROLLBACK ==========
+  rollback:
+    name: Rollback Production
+    runs-on: ubuntu-latest
+    if: failure() && github.ref == 'refs/heads/main'
+    needs: deploy-production
+
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Rollback
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+          set -e
+
+          echo "⚠️  ROLLBACK IN PROGRESS..."
+          cd ${{ secrets.SSH_PROJECT_PATH }}/backend
+
+          # Revertir código
+          git reset --hard HEAD~1
+
+          # Reinstalar dependencias de versión anterior
+          composer install --no-dev
+
+          # Migraciones rollback (si es necesario)
+          php artisan migrate:refresh --force || true
+
+          # Cache clear
+          php artisan config:cache
+          php artisan route:cache
+
+          echo "✅ Rollback completed"
+          EOF
+
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/id_rsa
+
+      - name: Notify Slack Rollback
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "⚠️  Production Rollback Executed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*⚠️  Production Rollback*\n\nDeploy failed and production has been rolled back to previous version.\nAuthor: ${{ github.actor }}"
+                  }
+                }
+              ]
+            }

@@ -1,0 +1,36 @@
+# Laravel
+backend/node_modules
+backend/vendor
+backend/.env
+backend/.env.local
+backend/.env.*.local
+backend/storage
+backend/bootstrap/cache
+backend/.DS_Store
+
+# React Native / Node
+mobile/node_modules
+mobile/android/build
+mobile/android/.gradle
+mobile/android/app/build
+mobile/android/local.properties
+mobile/ios/Pods
+mobile/ios/Podfile.lock
+mobile/.expo
+mobile/dist
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config files with secrets
+google-services.json
+.env
+.env.local

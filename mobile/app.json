@@ -1,0 +1,7 @@
+{
+  "name": "MailAlert",
+  "displayName": "Mail Alert",
+  "project": {
+    "android": {}
+  }
+}
