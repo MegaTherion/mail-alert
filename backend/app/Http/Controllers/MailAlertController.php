@@ -38,7 +38,7 @@ class MailAlertController extends Controller
             $validated = $request->validate([
                 'rule' => 'required|string|max:255',
                 'priority' => 'required|in:high,emergency',
-                'from' => 'required|string|max:255',
+                'sender' => 'required|string|max:255',
                 'subject' => 'required|string|max:255',
                 'snippet' => 'required|string',
                 'timestamp' => 'required|date_format:Y-m-d\TH:i:s\Z',
@@ -56,7 +56,7 @@ class MailAlertController extends Controller
             $alert = MailAlert::create([
                 'rule' => $validated['rule'],
                 'priority' => $validated['priority'],
-                'from_address' => $validated['from'],
+                'from_address' => $validated['sender'],
                 'subject' => $validated['subject'],
                 'snippet' => $validated['snippet'],
                 'timestamp' => $validated['timestamp'],
@@ -70,7 +70,7 @@ class MailAlertController extends Controller
                 data: [
                     'rule' => $validated['rule'],
                     'priority' => $validated['priority'],
-                    'from' => $validated['from'],
+                    'from' => $validated['sender'],
                     'subject' => $validated['subject'],
                     'snippet' => $validated['snippet'],
                 ],
