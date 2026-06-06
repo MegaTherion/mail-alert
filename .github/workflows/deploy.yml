@@ -27,13 +27,18 @@ jobs:
           echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
 
+          # Detect SSH port (default 22 if not specified)
+          SSH_PORT="${{ secrets.SSH_PORT }}"
+          SSH_PORT=${SSH_PORT:-22}
+
           # Add host to known_hosts
-          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -p $SSH_PORT -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
           # Create SSH config
           cat > ~/.ssh/config << 'SSHCONFIG'
           Host deploy-server
             HostName ${{ secrets.SSH_HOST }}
+            Port $SSH_PORT
             User ${{ secrets.SSH_USER }}
             IdentityFile ~/.ssh/deploy_key
             StrictHostKeyChecking=accept-new
@@ -70,26 +75,26 @@ jobs:
           # Install dependencies
           echo ""
           echo "=== Installing dependencies ==="
-          composer install --no-dev --prefer-dist --no-interaction
+          ea-php83 /usr/local/bin/composer install --no-dev --prefer-dist --no-interaction
           echo "✓ Dependencies installed"
 
           # Clear configuration cache
           echo ""
           echo "=== Clearing configuration ==="
-          php artisan config:clear
+          ea-php83 artisan config:clear
           echo "✓ Configuration cleared"
 
           # Run migrations
           echo ""
           echo "=== Running migrations ==="
-          php artisan migrate --force --no-interaction
+          ea-php83 artisan migrate --force --no-interaction
           echo "✓ Migrations completed"
 
           # Cache optimization
           echo ""
           echo "=== Caching configuration ==="
-          php artisan config:cache
-          php artisan route:cache
+          ea-php83 artisan config:cache
+          ea-php83 artisan route:cache
           echo "✓ Cache updated"
 
           # Set permissions
