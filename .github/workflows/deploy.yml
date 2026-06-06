@@ -50,20 +50,20 @@ jobs:
 
       - name: Deploy via SSH
         run: |
-          ssh deploy-server << 'DEPLOY'
+          ssh deploy-server << DEPLOY
           set -e
 
           # Navigate to project directory
           cd ${{ secrets.SSH_PROJECT_PATH }}/backend
 
           echo "=== Starting Deploy ==="
-          echo "Server: \$(hostname)"
+          echo "Server: $(hostname)"
           echo "Branch: main"
-          echo "Date: \$(date)"
+          echo "Date: $(date)"
 
           # Backup .env if exists
           if [ -f .env ]; then
-            cp .env .env.backup.\$(date +%s)
+            cp .env .env.backup.$(date +%s)
             echo "✓ .env backed up"
           fi
 
