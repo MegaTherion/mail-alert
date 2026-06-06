@@ -24,7 +24,9 @@ jobs:
           chmod 700 ~/.ssh
 
           # Save private key
-          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+
+          # Note: SSH_PRIVATE_KEY contains the full private key content
           chmod 600 ~/.ssh/deploy_key
 
           # Detect SSH port (default 22 if not specified)
@@ -52,7 +54,7 @@ jobs:
           set -e
 
           # Navigate to project directory
-          cd ${{ secrets.SSH_PATH }}/backend
+          cd ${{ secrets.SSH_PROJECT_PATH }}/backend
 
           echo "=== Starting Deploy ==="
           echo "Server: \$(hostname)"
