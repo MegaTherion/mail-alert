@@ -70,7 +70,7 @@ class MailAlertController extends Controller
                 data: [
                     'rule' => $validated['rule'],
                     'priority' => $validated['priority'],
-                    'from' => $validated['sender'],
+                    'sender' => $validated['sender'],
                     'subject' => $validated['subject'],
                     'snippet' => $validated['snippet'],
                 ],
