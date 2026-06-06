@@ -37,7 +37,7 @@ jobs:
           ssh-keyscan -p $SSH_PORT -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
           # Create SSH config
-          cat > ~/.ssh/config << 'SSHCONFIG'
+          cat > ~/.ssh/config << SSHCONFIG
           Host deploy-server
             HostName ${{ secrets.SSH_HOST }}
             Port $SSH_PORT
