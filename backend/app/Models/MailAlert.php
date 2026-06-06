@@ -17,6 +17,7 @@ class MailAlert extends Model
         'timestamp',
         'sent_at',
     ];
+    
 
     protected $casts = [
         'timestamp' => 'datetime',
